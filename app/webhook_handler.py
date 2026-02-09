@@ -6,14 +6,15 @@ from app.config import Config
 from app.queue_publisher import publish_update
 
 
-def handle_update(update: Dict[str, Any], config: Config) -> None:
+def handle_update(update: Dict[str, Any], config: Config) -> str:
     message = update.get("message")
     if not message:
-        raise ValueError("Unsupported update type")
+        return "ignored"
 
     chat = message.get("chat", {})
     chat_id = chat.get("id")
     if chat_id != config.ingest_chat_id:
-        raise ValueError("Chat ID not allowed")
+        return "ignored"
 
     publish_update(update, config)
+    return "published"

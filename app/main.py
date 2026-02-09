@@ -28,8 +28,11 @@ def telegram_webhook() -> tuple[dict, int]:
         return {"error": "invalid_json"}, 400
 
     try:
-        handle_update(update, _config)
+        result = handle_update(update, _config)
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}, 500
+
+    if result == "ignored":
+        return {"status": "ignored"}, 200
 
     return {"status": "accepted"}, 200
