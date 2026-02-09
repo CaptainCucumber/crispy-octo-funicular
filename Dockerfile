@@ -9,4 +9,4 @@ COPY ./app ./app
 
 ENV PORT=8080
 
-CMD ["gunicorn", "-b", "0.0.0.0:${PORT}", "app.main:app"]
+CMD ["sh", "-c", "gunicorn -b 0.0.0.0:${PORT} app.main:app"]
