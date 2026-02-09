@@ -13,7 +13,7 @@ def handle_update(update: Dict[str, Any], config: Config) -> None:
 
     chat = message.get("chat", {})
     chat_id = chat.get("id")
-    if chat_id != config.chat_id:
+    if chat_id != config.ingest_chat_id:
         raise ValueError("Chat ID not allowed")
 
     publish_update(update, config)

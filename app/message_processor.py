@@ -88,7 +88,7 @@ def _should_reply(update: Update, config: Config) -> bool:
     if "?" in text:
         return True
 
-    last_reply_time = get_last_reply_time(config.chat_id, config)
+    last_reply_time = get_last_reply_time(config.reply_chat_id, config)
     if last_reply_time:
         delta = datetime.now(tz=timezone.utc) - last_reply_time
         if delta.total_seconds() < DEFAULT_COOLDOWN_SECONDS:
@@ -111,7 +111,7 @@ def process_update(update: Dict[str, Any], config: Config) -> None:
         return
 
     save_message(
-        chat_id=config.chat_id,
+        chat_id=config.ingest_chat_id,
         message_id=parsed.message.message_id,
         payload={
             "message_id": parsed.message.message_id,
@@ -127,7 +127,7 @@ def process_update(update: Dict[str, Any], config: Config) -> None:
         mark_update_processed(parsed.update_id, config)
         return
 
-    history = get_latest_messages(config.chat_id, DEFAULT_HISTORY_LIMIT, config)
+    history = get_latest_messages(config.ingest_chat_id, DEFAULT_HISTORY_LIMIT, config)
     style_profile = _build_style_profile(history)
 
     recent_messages = [
@@ -146,14 +146,14 @@ def process_update(update: Dict[str, Any], config: Config) -> None:
     ]
 
     context = AIContext(
-        chat_id=config.chat_id,
+        chat_id=config.ingest_chat_id,
         recent_messages=list(reversed(recent_messages)),
         style_profile=style_profile,
     )
 
     reply = generate_reply(context, config)
     if reply:
-        _send_telegram_reply(config.chat_id, reply, config)
-        save_reply(config.chat_id, parsed.message.message_id, reply, config)
+        _send_telegram_reply(config.reply_chat_id, reply, config)
+        save_reply(config.reply_chat_id, parsed.message.message_id, reply, config)
 
     mark_update_processed(parsed.update_id, config)

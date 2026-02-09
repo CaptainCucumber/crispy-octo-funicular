@@ -30,7 +30,8 @@ def test_generate_reply_builds_payload(monkeypatch):
 
     config = Config(
         project_id="proj",
-        chat_id=123,
+        ingest_chat_id=123,
+        reply_chat_id=123,
         pubsub_topic="topic",
         pubsub_audience=None,
         telegram_token="token",

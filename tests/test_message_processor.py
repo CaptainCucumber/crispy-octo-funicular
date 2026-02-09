@@ -7,7 +7,8 @@ from app.message_processor import process_update
 def _config():
     return Config(
         project_id="proj",
-        chat_id=123,
+        ingest_chat_id=123,
+        reply_chat_id=123,
         pubsub_topic="topic",
         pubsub_audience=None,
         telegram_token="token",

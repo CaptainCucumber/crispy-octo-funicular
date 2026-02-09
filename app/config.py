@@ -15,7 +15,8 @@ load_dotenv()
 @dataclass(frozen=True)
 class Config:
     project_id: str
-    chat_id: int
+    ingest_chat_id: int
+    reply_chat_id: int
     pubsub_topic: str
     pubsub_audience: Optional[str]
     telegram_token: str
@@ -50,7 +51,9 @@ def _resolve_secret(env_value: str) -> str:
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     project_id = _require("PROJECT_ID")
-    chat_id = int(_require("CHAT_ID"))
+    ingest_chat_id = int(_require("CHAT_ID"))
+    reply_chat_id_value = os.getenv("REPLY_CHAT_ID")
+    reply_chat_id = int(reply_chat_id_value) if reply_chat_id_value else ingest_chat_id
     pubsub_topic = _require("PUBSUB_TOPIC")
     pubsub_audience = os.getenv("PUBSUB_AUDIENCE")
 
@@ -66,7 +69,8 @@ def get_config() -> Config:
 
     return Config(
         project_id=project_id,
-        chat_id=chat_id,
+        ingest_chat_id=ingest_chat_id,
+        reply_chat_id=reply_chat_id,
         pubsub_topic=pubsub_topic,
         pubsub_audience=pubsub_audience,
         telegram_token=telegram_token,

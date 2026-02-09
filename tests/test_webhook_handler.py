@@ -12,7 +12,8 @@ def test_handle_update_publishes(monkeypatch):
 
     config = Config(
         project_id="proj",
-        chat_id=123,
+        ingest_chat_id=123,
+        reply_chat_id=123,
         pubsub_topic="topic",
         pubsub_audience=None,
         telegram_token="token",
@@ -35,7 +36,8 @@ def test_handle_update_rejects_other_chat(monkeypatch):
 
     config = Config(
         project_id="proj",
-        chat_id=123,
+        ingest_chat_id=123,
+        reply_chat_id=123,
         pubsub_topic="topic",
         pubsub_audience=None,
         telegram_token="token",
