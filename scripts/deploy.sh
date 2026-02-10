@@ -10,6 +10,10 @@ WORKER_SERVICE=telegram-ai-worker
 TOPIC_NAME=${PUBSUB_TOPIC:-telegram-updates}
 SUBSCRIPTION_NAME=${PUBSUB_SUBSCRIPTION:-telegram-updates-push}
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+PATH="$REPO_ROOT/gcloud/google-cloud-sdk/bin:$PATH"
+
 # Build container
 
 gcloud builds submit --tag "$IMAGE" .
@@ -32,7 +36,7 @@ gcloud run deploy "$WEBHOOK_SERVICE" \
   --concurrency=1 \
   --memory=512Mi \
   --set-secrets="TG_TOKEN=$TG_TOKEN_SECRET,OPENAI_KEY=$OPENAI_SECRET,WEBHOOK_SECRET=$WEBHOOK_SECRET" \
-  --set-env-vars="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME"
+  --set-env-vars="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,REPLY_CHAT_ID=$REPLY_CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME"
 
 # Deploy worker service
 
@@ -45,7 +49,7 @@ gcloud run deploy "$WORKER_SERVICE" \
   --concurrency=1 \
   --memory=512Mi \
   --set-secrets="TG_TOKEN=$TG_TOKEN_SECRET,OPENAI_KEY=$OPENAI_SECRET,WEBHOOK_SECRET=$WEBHOOK_SECRET" \
-  --set-env-vars="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME,SKIP_PUBSUB_AUTH=true" \
+  --set-env-vars="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,REPLY_CHAT_ID=$REPLY_CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME,SKIP_PUBSUB_AUTH=true" \
   --command "gunicorn" \
   --args=-b,0.0.0.0:8080,app.worker:app
 
