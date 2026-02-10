@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 from typing import Any, Dict, Mapping
 
@@ -10,6 +11,9 @@ from google.oauth2 import id_token
 
 from app.config import Config
 from app.message_processor import process_update
+
+
+logger = logging.getLogger(__name__)
 
 
 def _verify_pubsub_jwt(headers: Mapping[str, str], audience: str) -> None:
@@ -29,12 +33,61 @@ def handle_pubsub_push(payload: Dict[str, Any], headers: Mapping[str, str], conf
         if not audience:
             raise ValueError("Missing Pub/Sub audience header")
         _verify_pubsub_jwt(headers, audience)
+        logger.info("pubsub.auth.verified", extra={"audience": audience})
+    else:
+        logger.info("pubsub.auth.skipped")
 
     message = payload.get("message", {})
+    pubsub_message_id = message.get("messageId")
+    pubsub_publish_time = message.get("publishTime")
     data = message.get("data")
     if not data:
+        logger.warning(
+            "pubsub.message.missing_data",
+            extra={
+                "pubsub_message_id": pubsub_message_id,
+                "pubsub_publish_time": pubsub_publish_time,
+            },
+        )
         raise ValueError("Missing Pub/Sub message data")
 
     decoded = base64.b64decode(data).decode("utf-8")
     update = json.loads(decoded)
-    process_update(update, config)
+    update_id = update.get("update_id")
+    message_payload = update.get("message") or {}
+    chat_id = (message_payload.get("chat") or {}).get("id")
+    message_id = message_payload.get("message_id")
+
+    logger.info(
+        "pubsub.message.received",
+        extra={
+            "pubsub_message_id": pubsub_message_id,
+            "pubsub_publish_time": pubsub_publish_time,
+            "update_id": update_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+        },
+    )
+
+    try:
+        process_update(update, config)
+        logger.info(
+            "pubsub.message.processed",
+            extra={
+                "pubsub_message_id": pubsub_message_id,
+                "update_id": update_id,
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "pubsub.message.failed",
+            extra={
+                "pubsub_message_id": pubsub_message_id,
+                "update_id": update_id,
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
+        )
+        raise

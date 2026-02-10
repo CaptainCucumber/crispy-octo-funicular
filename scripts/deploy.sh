@@ -21,12 +21,6 @@ TG_TOKEN_SECRET="telegram-token:latest"
 OPENAI_SECRET="openai-key:latest"
 WEBHOOK_SECRET="webhook-secret:latest"
 
-ENV_VARS="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME"
-if [ -n "${REPLY_CHAT_ID:-}" ]; then
-  ENV_VARS="$ENV_VARS,REPLY_CHAT_ID=$REPLY_CHAT_ID"
-fi
-WORKER_ENV_VARS="$ENV_VARS,SKIP_PUBSUB_AUTH=true"
-
 # Deploy webhook service
 
 gcloud run deploy "$WEBHOOK_SERVICE" \
@@ -38,7 +32,7 @@ gcloud run deploy "$WEBHOOK_SERVICE" \
   --concurrency=1 \
   --memory=512Mi \
   --set-secrets="TG_TOKEN=$TG_TOKEN_SECRET,OPENAI_KEY=$OPENAI_SECRET,WEBHOOK_SECRET=$WEBHOOK_SECRET" \
-  --set-env-vars="$ENV_VARS"
+  --set-env-vars="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME"
 
 # Deploy worker service
 
@@ -51,7 +45,7 @@ gcloud run deploy "$WORKER_SERVICE" \
   --concurrency=1 \
   --memory=512Mi \
   --set-secrets="TG_TOKEN=$TG_TOKEN_SECRET,OPENAI_KEY=$OPENAI_SECRET,WEBHOOK_SECRET=$WEBHOOK_SECRET" \
-  --set-env-vars="$WORKER_ENV_VARS" \
+  --set-env-vars="PROJECT_ID=$PROJECT_ID,CHAT_ID=$CHAT_ID,PUBSUB_TOPIC=$TOPIC_NAME,SKIP_PUBSUB_AUTH=true" \
   --command "gunicorn" \
   --args=-b,0.0.0.0:8080,app.worker:app
 

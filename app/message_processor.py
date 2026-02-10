@@ -106,8 +106,17 @@ def _send_telegram_reply(chat_id: int, text: str, config: Config) -> None:
 
 def process_update(update: Dict[str, Any], config: Config) -> None:
     parsed = _parse_update(update)
+    message_payload = update.get("message") or {}
+    chat_id = (message_payload.get("chat") or {}).get("id")
+    context = {
+        "update_id": parsed.update_id,
+        "chat_id": chat_id,
+        "message_id": parsed.message.message_id,
+        "user_id": parsed.message.sender.id,
+        "username": parsed.message.sender.username,
+    }
     if is_update_processed(parsed.update_id, config):
-        logger.info("Duplicate update ignored", extra={"update_id": parsed.update_id})
+        logger.info("update.duplicate", extra=context)
         return
 
     save_message(
@@ -122,9 +131,13 @@ def process_update(update: Dict[str, Any], config: Config) -> None:
         },
         config=config,
     )
+    logger.info("message.saved", extra=context)
 
-    if not _should_reply(parsed, config):
+    should_reply = _should_reply(parsed, config)
+    logger.info("reply.decision", extra={**context, "should_reply": should_reply})
+    if not should_reply:
         mark_update_processed(parsed.update_id, config)
+        logger.info("update.processed", extra=context)
         return
 
     history = get_latest_messages(config.ingest_chat_id, DEFAULT_HISTORY_LIMIT, config)
@@ -155,5 +168,9 @@ def process_update(update: Dict[str, Any], config: Config) -> None:
     if reply:
         _send_telegram_reply(config.reply_chat_id, reply, config)
         save_reply(config.reply_chat_id, parsed.message.message_id, reply, config)
+        logger.info("reply.sent", extra={**context, "reply_chat_id": config.reply_chat_id})
+    else:
+        logger.info("reply.empty", extra=context)
 
     mark_update_processed(parsed.update_id, config)
+    logger.info("update.processed", extra=context)
