@@ -13,6 +13,11 @@ output "pubsub_subscription" {
   description = "Pub/Sub subscription name (if created)."
 }
 
+output "pubsub_dead_letter_topic" {
+  value       = google_pubsub_topic.dead_letter.name
+  description = "Pub/Sub dead-letter topic name."
+}
+
 output "pubsub_invoker_service_account" {
   value       = google_service_account.pubsub_invoker.email
   description = "Service account email for Pub/Sub push auth."

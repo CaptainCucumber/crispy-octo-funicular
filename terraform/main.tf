@@ -13,6 +13,10 @@ provider "google" {
   region  = var.region
 }
 
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 locals {
   apis = [
     "run.googleapis.com",
@@ -76,6 +80,20 @@ resource "google_pubsub_topic" "updates" {
   ]
 }
 
+resource "google_pubsub_topic" "dead_letter" {
+  name = var.pubsub_dead_letter_topic
+
+  depends_on = [
+    google_project_service.required,
+  ]
+}
+
+resource "google_pubsub_topic_iam_member" "dead_letter_publisher" {
+  topic  = google_pubsub_topic.dead_letter.name
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
 resource "google_service_account" "pubsub_invoker" {
   account_id   = var.pubsub_invoker_sa
   display_name = "Pub/Sub Invoker"
@@ -95,6 +113,13 @@ resource "google_pubsub_subscription" "push" {
   name  = var.pubsub_subscription
   topic = google_pubsub_topic.updates.name
 
+  ack_deadline_seconds = 60
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.dead_letter.id
+    max_delivery_attempts = 5
+  }
+
   push_config {
     push_endpoint = "${google_cloud_run_service.worker.status[0].url}/pubsub/push"
     oidc_token {
@@ -104,6 +129,7 @@ resource "google_pubsub_subscription" "push" {
 
   depends_on = [
     google_project_service.required,
+    google_pubsub_topic_iam_member.dead_letter_publisher,
   ]
 }
 

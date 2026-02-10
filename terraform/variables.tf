@@ -85,6 +85,12 @@ variable "pubsub_subscription" {
   default     = "telegram-updates-push"
 }
 
+variable "pubsub_dead_letter_topic" {
+  type        = string
+  description = "Pub/Sub dead-letter topic name."
+  default     = "telegram-updates-dlq"
+}
+
 variable "worker_url" {
   type        = string
   description = "Cloud Run worker URL (e.g., https://...run.app). Leave empty to skip subscription creation."
