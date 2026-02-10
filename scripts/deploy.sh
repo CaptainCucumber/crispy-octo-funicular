@@ -9,6 +9,7 @@ WEBHOOK_SERVICE=telegram-ai-webhook
 WORKER_SERVICE=telegram-ai-worker
 TOPIC_NAME=${PUBSUB_TOPIC:-telegram-updates}
 SUBSCRIPTION_NAME=${PUBSUB_SUBSCRIPTION:-telegram-updates-push}
+DEAD_LETTER_TOPIC_NAME=${PUBSUB_DEAD_LETTER_TOPIC:-telegram-updates-dlq}
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
@@ -20,6 +21,8 @@ gcloud builds submit --tag "$IMAGE" .
 
 # Create Pub/Sub topic (idempotent)
 gcloud pubsub topics create "$TOPIC_NAME" || true
+# Create dead-letter topic (idempotent)
+gcloud pubsub topics create "$DEAD_LETTER_TOPIC_NAME" || true
 
 TG_TOKEN_SECRET="telegram-token:latest"
 OPENAI_SECRET="openai-key:latest"
@@ -59,6 +62,13 @@ gcloud iam service-accounts create "$SERVICE_ACCOUNT_NAME" \
 
 SERVICE_ACCOUNT_EMAIL="$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
+PUBSUB_SERVICE_ACCOUNT="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+gcloud pubsub topics add-iam-policy-binding "$DEAD_LETTER_TOPIC_NAME" \
+  --member="serviceAccount:${PUBSUB_SERVICE_ACCOUNT}" \
+  --role="roles/pubsub.publisher" || true
+
 # Allow Pub/Sub to invoke the worker service
 gcloud run services add-iam-policy-binding "$WORKER_SERVICE" \
   --region "$REGION" \
@@ -71,7 +81,10 @@ WORKER_URL=$(gcloud run services describe "$WORKER_SERVICE" --region "$REGION" -
 gcloud pubsub subscriptions create "$SUBSCRIPTION_NAME" \
   --topic="$TOPIC_NAME" \
   --push-endpoint="$WORKER_URL/pubsub/push" \
-  --push-auth-service-account="$SERVICE_ACCOUNT_EMAIL" || true
+  --push-auth-service-account="$SERVICE_ACCOUNT_EMAIL" \
+  --ack-deadline=60 \
+  --dead-letter-topic="$DEAD_LETTER_TOPIC_NAME" \
+  --max-delivery-attempts=3 || true
 
 # Register Telegram webhook
 WEBHOOK_URL=$(gcloud run services describe "$WEBHOOK_SERVICE" --region "$REGION" --format='value(status.url)')

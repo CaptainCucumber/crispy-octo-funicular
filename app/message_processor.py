@@ -37,6 +37,7 @@ def _parse_update(update: Dict[str, Any]) -> Update:
         id=from_user.get("id"),
         username=from_user.get("username"),
         first_name=from_user.get("first_name"),
+        is_bot=bool(from_user.get("is_bot", False)),
     )
 
     entities = [
@@ -79,6 +80,12 @@ def _build_style_profile(messages: List[Dict[str, Any]]) -> StyleProfile:
 
 
 def _should_reply(update: Update, config: Config) -> bool:
+    if update.message.sender.is_bot:
+        return False
+
+    if update.message.sender.id is None:
+        return False
+
     if config.bot_user_id and update.message.sender.id == config.bot_user_id:
         return False
 
@@ -110,7 +117,7 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
     message_payload = update.get("message") or {}
     chat_id = (message_payload.get("chat") or {}).get("id")
     trace_context = build_trace_context(trace_id, config.project_id)
-    context = {
+    log_context = {
         "update_id": parsed.update_id,
         "chat_id": chat_id,
         "message_id": parsed.message.message_id,
@@ -119,7 +126,7 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
         **trace_context,
     }
     if is_update_processed(parsed.update_id, config):
-        logger.info("update.duplicate", extra=context)
+        logger.info("update.duplicate", extra=log_context)
         return
 
     save_message(
@@ -134,13 +141,13 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
         },
         config=config,
     )
-    logger.info("message.saved", extra=context)
+    logger.info("message.saved", extra=log_context)
 
     should_reply = _should_reply(parsed, config)
-    logger.info("reply.decision", extra={**context, "should_reply": should_reply})
+    logger.info("reply.decision", extra={**log_context, "should_reply": should_reply})
     if not should_reply:
         mark_update_processed(parsed.update_id, config)
-        logger.info("update.processed", extra=context)
+        logger.info("update.processed", extra=log_context)
         return
 
     history = get_latest_messages(config.ingest_chat_id, DEFAULT_HISTORY_LIMIT, config)
@@ -161,19 +168,25 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
         for m in history[:DEFAULT_CONTEXT_MESSAGES]
     ]
 
-    context = AIContext(
+    ai_context = AIContext(
         chat_id=config.ingest_chat_id,
         recent_messages=list(reversed(recent_messages)),
         style_profile=style_profile,
     )
 
-    reply = generate_reply(context, config)
-    if reply:
-        _send_telegram_reply(config.reply_chat_id, reply, config)
-        save_reply(config.reply_chat_id, parsed.message.message_id, reply, config)
-        logger.info("reply.sent", extra={**context, "reply_chat_id": config.reply_chat_id})
-    else:
-        logger.info("reply.empty", extra=context)
-
-    mark_update_processed(parsed.update_id, config)
-    logger.info("update.processed", extra=context)
+    try:
+        reply = generate_reply(ai_context, config)
+        if reply:
+            _send_telegram_reply(config.reply_chat_id, reply, config)
+            save_reply(config.reply_chat_id, parsed.message.message_id, reply, config)
+            logger.info(
+                "reply.sent",
+                extra={**log_context, "reply_chat_id": config.reply_chat_id},
+            )
+        else:
+            logger.info("reply.empty", extra=log_context)
+    except Exception:
+        logger.exception("reply.failed", extra=log_context)
+    finally:
+        mark_update_processed(parsed.update_id, config)
+        logger.info("update.processed", extra=log_context)

@@ -10,6 +10,7 @@ class User:
     id: int
     username: Optional[str]
     first_name: Optional[str]
+    is_bot: bool = False
 
 
 @dataclass

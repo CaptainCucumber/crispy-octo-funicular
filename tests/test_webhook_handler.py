@@ -25,7 +25,14 @@ def test_handle_update_publishes(monkeypatch):
         bot_user_id=None,
     )
 
-    update = {"update_id": 1, "message": {"chat": {"id": 123}, "text": "hi"}}
+    update = {
+        "update_id": 1,
+        "message": {
+            "chat": {"id": 123},
+            "text": "hi",
+            "from": {"id": 10, "username": "alice", "is_bot": False},
+        },
+    }
     result = handle_update(update, config)
 
     assert calls["update"] == update
@@ -50,7 +57,14 @@ def test_handle_update_rejects_other_chat(monkeypatch):
         bot_user_id=None,
     )
 
-    update = {"update_id": 1, "message": {"chat": {"id": 456}, "text": "hi"}}
+    update = {
+        "update_id": 1,
+        "message": {
+            "chat": {"id": 456},
+            "text": "hi",
+            "from": {"id": 10, "username": "alice", "is_bot": False},
+        },
+    }
 
     result = handle_update(update, config)
     assert result == "ignored"

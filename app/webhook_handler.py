@@ -11,6 +11,14 @@ def handle_update(update: Dict[str, Any], config: Config, trace_id: Optional[str
     if not message:
         return "ignored"
 
+    from_user = message.get("from") or {}
+    if from_user.get("is_bot"):
+        return "ignored"
+    if config.bot_user_id and from_user.get("id") == config.bot_user_id:
+        return "ignored"
+    if not from_user:
+        return "ignored"
+
     chat = message.get("chat", {})
     chat_id = chat.get("id")
     if chat_id != config.ingest_chat_id:
