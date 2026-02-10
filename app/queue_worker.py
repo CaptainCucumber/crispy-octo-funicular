@@ -11,6 +11,7 @@ from google.oauth2 import id_token
 
 from app.config import Config
 from app.message_processor import process_update
+from app.trace import build_trace_context, extract_trace_id
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,9 @@ def handle_pubsub_push(payload: Dict[str, Any], headers: Mapping[str, str], conf
     message = payload.get("message", {})
     pubsub_message_id = message.get("messageId")
     pubsub_publish_time = message.get("publishTime")
+    attributes = message.get("attributes") or {}
+    trace_id = attributes.get("trace_id") or extract_trace_id(headers)
+    trace_context = build_trace_context(trace_id, config.project_id)
     data = message.get("data")
     if not data:
         logger.warning(
@@ -47,6 +51,7 @@ def handle_pubsub_push(payload: Dict[str, Any], headers: Mapping[str, str], conf
             extra={
                 "pubsub_message_id": pubsub_message_id,
                 "pubsub_publish_time": pubsub_publish_time,
+                **trace_context,
             },
         )
         raise ValueError("Missing Pub/Sub message data")
@@ -66,11 +71,12 @@ def handle_pubsub_push(payload: Dict[str, Any], headers: Mapping[str, str], conf
             "update_id": update_id,
             "chat_id": chat_id,
             "message_id": message_id,
+            **trace_context,
         },
     )
 
     try:
-        process_update(update, config)
+        process_update(update, config, trace_id=trace_id)
         logger.info(
             "pubsub.message.processed",
             extra={
@@ -78,6 +84,7 @@ def handle_pubsub_push(payload: Dict[str, Any], headers: Mapping[str, str], conf
                 "update_id": update_id,
                 "chat_id": chat_id,
                 "message_id": message_id,
+                **trace_context,
             },
         )
     except Exception:
@@ -88,6 +95,7 @@ def handle_pubsub_push(payload: Dict[str, Any], headers: Mapping[str, str], conf
                 "update_id": update_id,
                 "chat_id": chat_id,
                 "message_id": message_id,
+                **trace_context,
             },
         )
         raise

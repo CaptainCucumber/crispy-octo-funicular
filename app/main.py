@@ -4,6 +4,7 @@ from flask import Flask, jsonify, request
 
 from app.config import get_config
 from app.logging_config import configure_logging
+from app.trace import extract_trace_id
 from app.webhook_handler import handle_update
 
 app = Flask(__name__)
@@ -28,7 +29,8 @@ def telegram_webhook() -> tuple[dict, int]:
         return {"error": "invalid_json"}, 400
 
     try:
-        result = handle_update(update, _config)
+        trace_id = extract_trace_id(request.headers)
+        result = handle_update(update, _config, trace_id=trace_id)
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}, 500
 

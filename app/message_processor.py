@@ -4,7 +4,7 @@ import logging
 import random
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -25,6 +25,7 @@ from app.storage import (
     save_message,
     save_reply,
 )
+from app.trace import build_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -104,16 +105,18 @@ def _send_telegram_reply(chat_id: int, text: str, config: Config) -> None:
     response.raise_for_status()
 
 
-def process_update(update: Dict[str, Any], config: Config) -> None:
+def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[str] = None) -> None:
     parsed = _parse_update(update)
     message_payload = update.get("message") or {}
     chat_id = (message_payload.get("chat") or {}).get("id")
+    trace_context = build_trace_context(trace_id, config.project_id)
     context = {
         "update_id": parsed.update_id,
         "chat_id": chat_id,
         "message_id": parsed.message.message_id,
         "user_id": parsed.message.sender.id,
         "username": parsed.message.sender.username,
+        **trace_context,
     }
     if is_update_processed(parsed.update_id, config):
         logger.info("update.duplicate", extra=context)
