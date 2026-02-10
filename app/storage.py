@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from google.cloud import firestore
@@ -27,7 +27,7 @@ def is_update_processed(update_id: int, config: Config) -> bool:
 def mark_update_processed(update_id: int, config: Config) -> None:
     client = _get_client(config)
     client.collection("processed_updates").document(str(update_id)).set(
-        {"processed_at": datetime.utcnow().isoformat()}
+        {"processed_at": datetime.now(tz=timezone.utc).isoformat()}
     )
 
 
@@ -55,7 +55,7 @@ def save_reply(chat_id: int, message_id: int, reply_text: str, config: Config) -
     client = _get_client(config)
     client.collection("chats").document(str(chat_id)).collection("replies").document(
         str(message_id)
-    ).set({"reply_text": reply_text, "date": datetime.utcnow().isoformat()})
+    ).set({"reply_text": reply_text, "date": datetime.now(tz=timezone.utc).isoformat()})
 
 
 def get_last_reply_time(chat_id: int, config: Config) -> Optional[datetime]:
@@ -72,5 +72,8 @@ def get_last_reply_time(chat_id: int, config: Config) -> Optional[datetime]:
         data = doc.to_dict() or {}
         value = data.get("date")
         if value:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed
     return None
