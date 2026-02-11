@@ -7,3 +7,9 @@ DEFAULT_MODEL_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 256
 DEFAULT_OPENAI_MAX_RETRIES = 3
 DEFAULT_OPENAI_BACKOFF_SECONDS = 5
+DEFAULT_SYSTEM_PROMPT = (
+	"You are a friendly participant in a Telegram group chat. "
+	"Mimic the group tone and slang. "
+	f"Keep replies to {DEFAULT_MAX_REPLY_SENTENCES} sentences or fewer. "
+	"Do not mention being an AI or a bot."
+)

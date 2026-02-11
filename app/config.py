@@ -26,6 +26,7 @@ class Config:
     firestore_project_id: Optional[str]
     bot_username: Optional[str]
     bot_user_id: Optional[int]
+    admin_user_id: Optional[int]
 
 
 def _require(name: str) -> str:
@@ -66,6 +67,8 @@ def get_config() -> Config:
     bot_username = os.getenv("BOT_USERNAME")
     bot_user_id = os.getenv("BOT_USER_ID")
     bot_user_id_value = int(bot_user_id) if bot_user_id else None
+    admin_user_id = os.getenv("ADMIN_USER_ID")
+    admin_user_id_value = int(admin_user_id) if admin_user_id else None
 
     return Config(
         project_id=project_id,
@@ -80,4 +83,5 @@ def get_config() -> Config:
         firestore_project_id=firestore_project_id,
         bot_username=bot_username,
         bot_user_id=bot_user_id_value,
+        admin_user_id=admin_user_id_value,
     )

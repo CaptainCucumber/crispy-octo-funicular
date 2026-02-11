@@ -15,12 +15,19 @@ from app.constants import (
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_HISTORY_LIMIT,
     DEFAULT_REPLY_CHANCE,
+    DEFAULT_MAX_REPLY_SENTENCES,
+    DEFAULT_MODEL_TEMPERATURE,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_SYSTEM_PROMPT,
 )
 from app.models import AIContext, Message, MessageEntity, StyleProfile, Update, User
 from app.storage import (
     get_last_reply_time,
     get_latest_messages,
+    get_runtime_config,
     is_update_processed,
+    save_runtime_config,
+    clear_runtime_config,
     mark_update_processed,
     save_message,
     save_reply,
@@ -79,7 +86,12 @@ def _build_style_profile(messages: List[Dict[str, Any]]) -> StyleProfile:
     )
 
 
-def _should_reply(update: Update, config: Config) -> bool:
+def _should_reply(
+    update: Update,
+    config: Config,
+    reply_chance: float,
+    cooldown_seconds: int,
+) -> bool:
     if update.message.sender.is_bot:
         return False
 
@@ -99,10 +111,168 @@ def _should_reply(update: Update, config: Config) -> bool:
     last_reply_time = get_last_reply_time(config.reply_chat_id, config)
     if last_reply_time:
         delta = datetime.now(tz=timezone.utc) - last_reply_time
-        if delta.total_seconds() < DEFAULT_COOLDOWN_SECONDS:
+        if delta.total_seconds() < cooldown_seconds:
             return False
 
-    return random.random() < DEFAULT_REPLY_CHANCE
+    return random.random() < reply_chance
+
+
+def _extract_command(text: str, bot_username: Optional[str]) -> Optional[tuple[str, str]]:
+    if not text or not text.startswith("/"):
+        return None
+
+    first, *rest = text.strip().split(maxsplit=1)
+    command_part = first[1:]
+    if not command_part:
+        return None
+
+    if "@" in command_part:
+        command, username = command_part.split("@", 1)
+        if bot_username and username.lower() != bot_username.lower():
+            return None
+    else:
+        command = command_part
+
+    args = rest[0] if rest else ""
+    return command.lower(), args
+
+
+def _parse_int(value: str) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_float(value: str) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_admin_dm(message_payload: Dict[str, Any], config: Config, sender_id: Optional[int]) -> bool:
+    if not config.admin_user_id:
+        return False
+    if sender_id is None or sender_id != config.admin_user_id:
+        return False
+    chat = message_payload.get("chat") or {}
+    return chat.get("type") == "private"
+
+
+def _handle_admin_command(
+    update: Update,
+    message_payload: Dict[str, Any],
+    config: Config,
+    runtime_config: Dict[str, Any],
+) -> bool:
+    text = update.message.text or ""
+    parsed = _extract_command(text, config.bot_username)
+    if not parsed:
+        return False
+
+    command, args = parsed
+    args = args.strip()
+
+    def reply(text_out: str) -> None:
+        chat_id = (message_payload.get("chat") or {}).get("id")
+        if chat_id:
+            logger.info("admin.reply.sending", extra={"chat_id": chat_id, "text_length": len(text_out)})
+            _send_telegram_reply(chat_id, text_out, config)
+        else:
+            logger.warning("admin.reply.no_chat_id")
+
+    if command in {"help", "commands"}:
+        reply(
+            "Commands: /get_config, /reset_config, /set_reply_chance <0-1>, "
+            "/set_cooldown <seconds>, /set_context_messages <int>, /set_history_limit <int>, "
+            "/set_max_reply_sentences <int>, /set_model_temperature <0-2>, /set_max_tokens <int>, "
+            "/set_system_prompt <text>"
+        )
+        return True
+
+    if command == "get_config":
+        effective = {
+            "reply_chance": runtime_config.get("reply_chance", DEFAULT_REPLY_CHANCE),
+            "cooldown_seconds": runtime_config.get("cooldown_seconds", DEFAULT_COOLDOWN_SECONDS),
+            "context_messages": runtime_config.get("context_messages", DEFAULT_CONTEXT_MESSAGES),
+            "history_limit": runtime_config.get("history_limit", DEFAULT_HISTORY_LIMIT),
+            "max_reply_sentences": runtime_config.get(
+                "max_reply_sentences", DEFAULT_MAX_REPLY_SENTENCES
+            ),
+            "model_temperature": runtime_config.get(
+                "model_temperature", DEFAULT_MODEL_TEMPERATURE
+            ),
+            "max_tokens": runtime_config.get("max_tokens", DEFAULT_MAX_TOKENS),
+            "system_prompt": runtime_config.get("system_prompt", DEFAULT_SYSTEM_PROMPT),
+        }
+        reply(
+            "Current config:\n"
+            + "\n".join(f"{key}={value}" for key, value in effective.items())
+        )
+        return True
+
+    if command == "reset_config":
+        clear_runtime_config(config)
+        reply("Runtime config cleared.")
+        return True
+
+    updates: Dict[str, Any] = {}
+    if command == "set_reply_chance":
+        value = _parse_float(args)
+        if value is None or not 0 <= value <= 1:
+            reply("Invalid reply_chance. Expected a number between 0 and 1.")
+            return True
+        updates["reply_chance"] = value
+    elif command == "set_cooldown":
+        value = _parse_int(args)
+        if value is None or value < 0:
+            reply("Invalid cooldown. Expected a non-negative integer.")
+            return True
+        updates["cooldown_seconds"] = value
+    elif command == "set_context_messages":
+        value = _parse_int(args)
+        if value is None or value <= 0:
+            reply("Invalid context_messages. Expected a positive integer.")
+            return True
+        updates["context_messages"] = value
+    elif command == "set_history_limit":
+        value = _parse_int(args)
+        if value is None or value <= 0:
+            reply("Invalid history_limit. Expected a positive integer.")
+            return True
+        updates["history_limit"] = value
+    elif command == "set_max_reply_sentences":
+        value = _parse_int(args)
+        if value is None or value < 0:
+            reply("Invalid max_reply_sentences. Expected 0 or a positive integer.")
+            return True
+        updates["max_reply_sentences"] = value
+    elif command == "set_model_temperature":
+        value = _parse_float(args)
+        if value is None or not 0 <= value <= 2:
+            reply("Invalid model_temperature. Expected a number between 0 and 2.")
+            return True
+        updates["model_temperature"] = value
+    elif command == "set_max_tokens":
+        value = _parse_int(args)
+        if value is None or value <= 0:
+            reply("Invalid max_tokens. Expected a positive integer.")
+            return True
+        updates["max_tokens"] = value
+    elif command == "set_system_prompt":
+        if not args:
+            reply("Invalid system_prompt. Provide the prompt text after the command.")
+            return True
+        updates["system_prompt"] = args
+    else:
+        reply("Unknown command. Use /help for a list of commands.")
+        return True
+
+    runtime_config.update(updates)
+    save_runtime_config(config, runtime_config)
+    reply("Updated runtime config.")
+    return True
 
 
 def _send_telegram_reply(chat_id: int, text: str, config: Config) -> None:
@@ -116,6 +286,7 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
     parsed = _parse_update(update)
     message_payload = update.get("message") or {}
     chat_id = (message_payload.get("chat") or {}).get("id")
+    runtime_config = get_runtime_config(config)
     trace_context = build_trace_context(trace_id, config.project_id)
     log_context = {
         "update_id": parsed.update_id,
@@ -127,6 +298,16 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
     }
     if is_update_processed(parsed.update_id, config):
         logger.info("update.duplicate", extra=log_context)
+        return
+
+    if _is_admin_dm(message_payload, config, parsed.message.sender.id):
+        try:
+            handled = _handle_admin_command(parsed, message_payload, config, runtime_config)
+            mark_update_processed(parsed.update_id, config)
+            logger.info("admin.command", extra={**log_context, "handled": handled})
+        except Exception:
+            logger.exception("admin.command.failed", extra=log_context)
+            mark_update_processed(parsed.update_id, config)
         return
 
     save_message(
@@ -143,14 +324,21 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
     )
     logger.info("message.saved", extra=log_context)
 
-    should_reply = _should_reply(parsed, config)
+    history_limit = int(runtime_config.get("history_limit", DEFAULT_HISTORY_LIMIT))
+    context_messages = int(runtime_config.get("context_messages", DEFAULT_CONTEXT_MESSAGES))
+    reply_chance = float(runtime_config.get("reply_chance", DEFAULT_REPLY_CHANCE))
+    cooldown_seconds = int(
+        runtime_config.get("cooldown_seconds", DEFAULT_COOLDOWN_SECONDS)
+    )
+
+    should_reply = _should_reply(parsed, config, reply_chance, cooldown_seconds)
     logger.info("reply.decision", extra={**log_context, "should_reply": should_reply})
     if not should_reply:
         mark_update_processed(parsed.update_id, config)
         logger.info("update.processed", extra=log_context)
         return
 
-    history = get_latest_messages(config.ingest_chat_id, DEFAULT_HISTORY_LIMIT, config)
+    history = get_latest_messages(config.ingest_chat_id, history_limit, config)
     style_profile = _build_style_profile(history)
 
     recent_messages = [
@@ -165,13 +353,23 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
             date=datetime.fromisoformat(m.get("date")),
             entities=[],
         )
-        for m in history[:DEFAULT_CONTEXT_MESSAGES]
+        for m in history[:context_messages]
     ]
 
     ai_context = AIContext(
         chat_id=config.ingest_chat_id,
         recent_messages=list(reversed(recent_messages)),
         style_profile=style_profile,
+        metadata={
+            "max_reply_sentences": runtime_config.get(
+                "max_reply_sentences", DEFAULT_MAX_REPLY_SENTENCES
+            ),
+            "model_temperature": runtime_config.get(
+                "model_temperature", DEFAULT_MODEL_TEMPERATURE
+            ),
+            "max_tokens": runtime_config.get("max_tokens", DEFAULT_MAX_TOKENS),
+            "system_prompt": runtime_config.get("system_prompt", DEFAULT_SYSTEM_PROMPT),
+        },
     )
 
     try:

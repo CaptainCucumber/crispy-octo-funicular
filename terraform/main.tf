@@ -188,6 +188,11 @@ resource "google_cloud_run_service" "webhook" {
         }
 
         env {
+          name  = "ADMIN_USER_ID"
+          value = var.admin_user_id == null ? "" : tostring(var.admin_user_id)
+        }
+
+        env {
           name = "TG_TOKEN"
           value_from {
             secret_key_ref {
@@ -294,6 +299,11 @@ resource "google_cloud_run_service" "worker" {
         env {
           name  = "BOT_USER_ID"
           value = var.bot_user_id == null ? "" : tostring(var.bot_user_id)
+        }
+
+        env {
+          name  = "ADMIN_USER_ID"
+          value = var.admin_user_id == null ? "" : tostring(var.admin_user_id)
         }
 
         env {

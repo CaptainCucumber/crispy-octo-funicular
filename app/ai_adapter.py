@@ -59,7 +59,8 @@ def _build_messages(context: AIContext) -> List[Dict[str, str]]:
     for msg in context.recent_messages:
         if not msg.text:
             continue
-        messages.append({"role": "user", "content": msg.text})
+        speaker = msg.sender.username or msg.sender.first_name or "member"
+        messages.append({"role": "user", "content": f"{speaker}: {msg.text}"})
 
     return messages
 

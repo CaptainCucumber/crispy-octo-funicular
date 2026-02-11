@@ -67,6 +67,12 @@ variable "bot_user_id" {
   default     = null
 }
 
+variable "admin_user_id" {
+  type        = number
+  description = "Telegram admin user ID for DM commands (optional)."
+  default     = null
+}
+
 variable "skip_pubsub_auth" {
   type        = bool
   description = "Skip Pub/Sub auth verification in worker."
