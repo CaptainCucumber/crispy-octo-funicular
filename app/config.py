@@ -26,6 +26,7 @@ class Config:
     firestore_project_id: Optional[str]
     bot_username: Optional[str]
     bot_user_id: Optional[int]
+    instagram_access_token: Optional[str]
 
 
 def _require(name: str) -> str:
@@ -66,6 +67,10 @@ def get_config() -> Config:
     bot_username = os.getenv("BOT_USERNAME")
     bot_user_id = os.getenv("BOT_USER_ID")
     bot_user_id_value = int(bot_user_id) if bot_user_id else None
+    
+    # Instagram Basic Display API access token (optional)
+    instagram_token_env = os.getenv("INSTAGRAM_ACCESS_TOKEN")
+    instagram_access_token = _resolve_secret(instagram_token_env) if instagram_token_env else None
 
     return Config(
         project_id=project_id,
@@ -80,4 +85,5 @@ def get_config() -> Config:
         firestore_project_id=firestore_project_id,
         bot_username=bot_username,
         bot_user_id=bot_user_id_value,
+        instagram_access_token=instagram_access_token,
     )

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from app.ai_adapter import generate_reply
+from app.ai_adapter import analyze_video_frames, generate_reply, generate_video_comment
 from app.config import Config
 from app.constants import (
     DEFAULT_CONTEXT_MESSAGES,
@@ -26,6 +26,7 @@ from app.storage import (
     save_reply,
 )
 from app.trace import build_trace_context
+from app.video_processor import VideoProcessor, encode_frame_to_base64
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,14 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
         config=config,
     )
     logger.info("message.saved", extra=log_context)
+    
+    # Check if this is a video message (Instagram Reel)
+    video_info = message_payload.get("video") or message_payload.get("video_note")
+    if video_info:
+        _process_video_message(parsed, message_payload, config, log_context)
+        mark_update_processed(parsed.update_id, config)
+        logger.info("update.processed", extra=log_context)
+        return
 
     should_reply = _should_reply(parsed, config)
     logger.info("reply.decision", extra={**log_context, "should_reply": should_reply})
@@ -190,3 +199,136 @@ def process_update(update: Dict[str, Any], config: Config, trace_id: Optional[st
     finally:
         mark_update_processed(parsed.update_id, config)
         logger.info("update.processed", extra=log_context)
+
+
+def _process_video_message(
+    parsed: Update,
+    message_payload: Dict[str, Any],
+    config: Config,
+    log_context: Dict[str, Any],
+) -> None:
+    """
+    Process video messages (Instagram Reels) by extracting frames and analyzing content.
+    
+    Args:
+        parsed: Parsed update object
+        message_payload: Raw message payload
+        config: Application configuration
+        log_context: Logging context
+    """
+    logger.info("video.processing_started", extra=log_context)
+    
+    try:
+        # Check if Instagram access token is configured
+        if not hasattr(config, "instagram_access_token") or not config.instagram_access_token:
+            logger.warning("video.no_instagram_token", extra=log_context)
+            return
+        
+        # Get video file information
+        video_info = message_payload.get("video") or message_payload.get("video_note")
+        file_id = video_info.get("file_id")
+        
+        if not file_id:
+            logger.error("video.no_file_id", extra=log_context)
+            return
+        
+        # Download video file from Telegram
+        video_url = _get_telegram_file_url(file_id, config)
+        if not video_url:
+            logger.error("video.url_retrieval_failed", extra=log_context)
+            return
+        
+        # Process video: download and extract frames
+        video_processor = VideoProcessor(config)
+        frames = video_processor.process_video_url(video_url)
+        
+        if not frames:
+            logger.error("video.no_frames_extracted", extra=log_context)
+            return
+        
+        # Convert frames to base64 for AI analysis
+        frames_b64 = [encode_frame_to_base64(frame) for frame in frames]
+        
+        # Get caption if available
+        caption = message_payload.get("caption")
+        
+        # Analyze video content using AI
+        video_analysis = analyze_video_frames(frames_b64, caption, config)
+        
+        if not video_analysis:
+            logger.error("video.analysis_empty", extra=log_context)
+            return
+        
+        logger.info("video.analysis_success", extra={**log_context, "analysis": video_analysis[:200]})
+        
+        # Generate comment based on video analysis
+        history = get_latest_messages(config.ingest_chat_id, DEFAULT_HISTORY_LIMIT, config)
+        style_profile = _build_style_profile(history)
+        
+        recent_messages = [
+            Message(
+                message_id=m.get("message_id"),
+                sender=User(
+                    id=m.get("user_id"),
+                    username=m.get("username"),
+                    first_name=None,
+                ),
+                text=m.get("text"),
+                date=datetime.fromisoformat(m.get("date")),
+                entities=[],
+            )
+            for m in history[:DEFAULT_CONTEXT_MESSAGES]
+        ]
+        
+        ai_context = AIContext(
+            chat_id=config.ingest_chat_id,
+            recent_messages=list(reversed(recent_messages)),
+            style_profile=style_profile,
+        )
+        
+        comment = generate_video_comment(video_analysis, ai_context, config)
+        
+        if comment:
+            _send_telegram_reply(config.reply_chat_id, comment, config)
+            save_reply(config.reply_chat_id, parsed.message.message_id, comment, config)
+            logger.info("video.comment_sent", extra={**log_context, "comment": comment})
+        else:
+            logger.warning("video.no_comment_generated", extra=log_context)
+            
+    except Exception:
+        logger.exception("video.processing_failed", extra=log_context)
+
+
+def _get_telegram_file_url(file_id: str, config: Config) -> Optional[str]:
+    """
+    Get the download URL for a Telegram file.
+    
+    Args:
+        file_id: Telegram file ID
+        config: Application configuration
+        
+    Returns:
+        File download URL or None if retrieval fails
+    """
+    try:
+        url = f"https://api.telegram.org/bot{config.telegram_token}/getFile"
+        params = {"file_id": file_id}
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        if not data.get("ok"):
+            logger.error("telegram.file_info_failed", extra={"file_id": file_id})
+            return None
+        
+        file_path = data["result"].get("file_path")
+        if not file_path:
+            return None
+        
+        download_url = f"https://api.telegram.org/file/bot{config.telegram_token}/{file_path}"
+        return download_url
+        
+    except Exception as e:
+        logger.exception("telegram.file_url_error", extra={"error": str(e), "file_id": file_id})
+        return None
+
