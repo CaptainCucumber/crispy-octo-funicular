@@ -127,6 +127,12 @@ variable "webhook_secret_name" {
   default     = "webhook-secret"
 }
 
+variable "instagram_token_secret_name" {
+  type        = string
+  description = "Secret Manager secret name for Instagram access token."
+  default     = "instagram-access-token"
+}
+
 variable "enable_apis" {
   type        = bool
   description = "Enable required Google Cloud APIs."

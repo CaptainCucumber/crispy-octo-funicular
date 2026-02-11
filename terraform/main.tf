@@ -72,6 +72,15 @@ data "google_secret_manager_secret_version" "webhook_secret" {
   ]
 }
 
+data "google_secret_manager_secret_version" "instagram_token" {
+  secret  = var.instagram_token_secret_name
+  version = "latest"
+
+  depends_on = [
+    google_project_service.required,
+  ]
+}
+
 resource "google_pubsub_topic" "updates" {
   name = var.pubsub_topic
 
@@ -113,7 +122,7 @@ resource "google_pubsub_subscription" "push" {
   name  = var.pubsub_subscription
   topic = google_pubsub_topic.updates.name
 
-  ack_deadline_seconds = 60
+  ack_deadline_seconds = 360
 
   dead_letter_policy {
     dead_letter_topic     = google_pubsub_topic.dead_letter.id
@@ -216,7 +225,19 @@ resource "google_cloud_run_service" "webhook" {
             }
           }
         }
+
+        env {
+          name = "INSTAGRAM_ACCESS_TOKEN"
+          value_from {
+            secret_key_ref {
+              name = data.google_secret_manager_secret_version.instagram_token.secret
+              key  = "latest"
+            }
+          }
+        }
       }
+
+      timeout_seconds = 300
     }
   }
 
@@ -325,7 +346,19 @@ resource "google_cloud_run_service" "worker" {
             }
           }
         }
+
+        env {
+          name = "INSTAGRAM_ACCESS_TOKEN"
+          value_from {
+            secret_key_ref {
+              name = data.google_secret_manager_secret_version.instagram_token.secret
+              key  = "latest"
+            }
+          }
+        }
       }
+
+      timeout_seconds = 300
     }
   }
 

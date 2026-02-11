@@ -23,16 +23,19 @@ class VideoProcessor:
         self.config = config
         self.instagram_access_token = config.instagram_access_token
         self.frame_interval = 2  # Extract 1 frame per 2 seconds
+        self.max_video_size = 100 * 1024 * 1024  # 100MB limit for Cloud Run
+        self.max_frames = 10  # Limit frames for memory efficiency
 
     def download_video(self, video_url: str) -> Optional[bytes]:
         """
         Download video from Instagram using the Basic Display API.
+        Checks file size before downloading to avoid exceeding 100MB limit.
         
         Args:
             video_url: The URL of the Instagram Reel video
             
         Returns:
-            Video content as bytes, or None if download fails
+            Video content as bytes, or None if download fails or exceeds size limit
         """
         try:
             headers = {
@@ -40,32 +43,55 @@ class VideoProcessor:
                 "User-Agent": "Mozilla/5.0 (compatible; InstagramBot/1.0)",
             }
             
+            # First, make a HEAD request to check content length
+            head_response = requests.head(video_url, headers=headers, timeout=10)
+            content_length = int(head_response.headers.get('content-length', 0))
+            
+            if content_length > self.max_video_size:
+                logger.error(
+                    "video.too_large",
+                    extra={"size": content_length, "max_size": self.max_video_size, "url": video_url}
+                )
+                return None
+            
+            # Now download the video with size checking
             response = requests.get(video_url, headers=headers, timeout=30, stream=True)
             response.raise_for_status()
             
             video_content = b""
+            downloaded = 0
+            
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
+                    downloaded += len(chunk)
+                    if downloaded > self.max_video_size:
+                        logger.error(
+                            "video.size_exceeded_during_download",
+                            extra={"downloaded": downloaded, "max_size": self.max_video_size}
+                        )
+                        return None
                     video_content += chunk
                     
-            logger.info(f"video.downloaded", extra={"video_size": len(video_content)})
+            logger.info("video.downloaded", extra={"video_size": len(video_content)})
             return video_content
             
         except Exception as e:
-            logger.exception(f"video.download_failed", extra={"error": str(e), "url": video_url})
+            logger.exception("video.download_failed", extra={"error": str(e), "url": video_url})
             return None
 
     def extract_frames(self, video_content: bytes) -> List[bytes]:
         """
         Extract frames from video at specified intervals.
+        Ensures temp file cleanup and memory release after processing.
         
         Args:
             video_content: Video content as bytes
             
         Returns:
-            List of frame images as bytes (JPEG format)
+            List of frame images as bytes (JPEG format), max 10 frames
         """
         frames = []
+        temp_video_path = None
         
         try:
             # Write video to temporary file
@@ -88,7 +114,7 @@ class VideoProcessor:
                 frame_count = 0
                 extracted_count = 0
                 
-                while True:
+                while extracted_count < self.max_frames:
                     ret, frame = cap.read()
                     if not ret:
                         break
@@ -127,12 +153,26 @@ class VideoProcessor:
                 )
                 
             finally:
-                # Clean up temporary file
-                if os.path.exists(temp_video_path):
-                    os.unlink(temp_video_path)
+                # Clean up temporary file immediately to free memory
+                if temp_video_path and os.path.exists(temp_video_path):
+                    try:
+                        os.unlink(temp_video_path)
+                        logger.debug("video.temp_file_deleted", extra={"path": temp_video_path})
+                    except Exception as cleanup_error:
+                        logger.warning(
+                            "video.cleanup_failed",
+                            extra={"error": str(cleanup_error), "path": temp_video_path}
+                        )
                     
         except Exception as e:
             logger.exception("video.frame_extraction_failed", extra={"error": str(e)})
+        finally:
+            # Ensure cleanup even if exception occurred
+            if temp_video_path and os.path.exists(temp_video_path):
+                try:
+                    os.unlink(temp_video_path)
+                except:
+                    pass
             
         return frames
 
